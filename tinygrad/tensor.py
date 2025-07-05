@@ -1267,10 +1267,44 @@ class Tensor(MathTrait):
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    dim_tensor = Tensor.meshgrid(*[Tensor.arange(s) for s in self.shape])[0]
-    res = cast(Tensor, dim_tensor == indices).where(v, self.contiguous())
+    flat_tags = Tensor.arange(start=0, stop=self.numel()).reshape(self.shape)
+    picked_flat = flat_tags[indices]
+    flat = picked_flat.flatten()             # 1-D view
+    rem  = flat                            # running remainder
+    coords_rev = []                        # collect last axis first
+    for dim in reversed(self.shape):
+        coords_rev.append(rem % dim)       # coordinate for this axis
+        rem = rem // dim                   # prepare for next (more significant) axis
+
+    coords = coords_rev[::-1]
+    assert all(isinstance(c, Tensor) for c in coords)
+
+    indices = tuple(c.reshape(picked_flat.shape) for c in coords)
+    res = self._getitem(indices, v)
+    # print("hey")
+    # dim_tensor = Tensor.meshgrid(*[Tensor.arange(s) for s in self.shape])
+    # print("Hey")
+    # if False: #all_int(indices): 
+    #   print(indices)
+    #   for i in range(len(indices)):
+    #     print(indices[i], dim_tensor[i].numpy())
+    #     res = cast(Tensor, all(dim_tensor[i] == indices[i]))
+    #   res = res.where(v, self.contiguous())
+    #   # print("YO: ", (res.contiguous()).numpy())
+    # else: #  if isinstance(s, (int, tuple, list)) else s
+    #   print(indices)
+    #   all_slices = all(isinstance(i, slice) for i in indices)
+    #   indices = [Tensor.arange(s.start or 0, s.stop or self.shape[i], s.step if s.step else 1) 
+    #              if isinstance(s, slice) else s if s is Ellipsis else Tensor(s) for i, s in enumerate(indices) if s]
+    #   # print([i.numpy() for i in indices])
+    #   assert all(isinstance(i, (type(Ellipsis), Optional[Tensor])) for i in indices)
+    #   indices = indices[0].meshgrid(*indices[1:], indexing="ij") if all_slices else indices
+    #   print([i.numpy() for i in indices if i is not None and i is not Ellipsis])
+    #   print(indices)
+    #   res = self._getitem(indices, v)
+    # print("hey", indices, v.numpy())
     if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
+      self.assign(res)
     else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
       res.assign(v)
